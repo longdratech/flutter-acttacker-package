@@ -1,94 +1,116 @@
 import 'package:attacker_package_mobile/contact_list.dart';
+import 'package:contacts_service/contacts_service.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-void main() => runApp(ContactsExampleApp());
+void main() => runApp(ContactsPage());
 
-// iOS only: Localized labels language setting is equal to CFBundleDevelopmentRegion value (Info.plist) of the iOS project
-// Set iOSLocalizedLabels=false if you always want english labels whatever is the CFBundleDevelopmentRegion value.
-const iOSLocalizedLabels = false;
-
-class ContactsExampleApp extends StatelessWidget {
+class SeeContactsButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: HomePage(),
-      routes: <String, WidgetBuilder>{
-        '/contactsList': (BuildContext context) => ContactListPage(),
-      },
+      home: Scaffold(
+        body: Center(
+          child: RaisedButton(
+            onPressed: () async {
+              final PermissionStatus permissionStatus = await _getPermission();
+              if (permissionStatus == PermissionStatus.granted) {
+                Navigator.push(context, MaterialPageRoute(builder: (context) => ContactsPage(),));
+              } else {
+                //If permissions have been denied show standard cupertino alert dialog
+                showDialog(
+                    context: context,
+                    builder: (BuildContext context) => CupertinoAlertDialog(
+                          title: Text('Permissions error'),
+                          content: Text('Please enable contacts access '
+                              'permission in system settings'),
+                          actions: <Widget>[
+                            CupertinoDialogAction(
+                              child: Text('OK'),
+                              onPressed: () => Navigator.of(context).pop(),
+                            )
+                          ],
+                        ));
+              }
+            },
+            child: Container(child: Text('See Contacts')),
+          ),
+        ),
+      ),
     );
   }
-}
 
-class HomePage extends StatefulWidget {
-  @override
-  _HomePageState createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  @override
-  void initState() {
-    super.initState();
-    _askPermissions();
-  }
-
-  Future<void> _askPermissions() async {
-    PermissionStatus permissionStatus = await _getContactPermission();
-    if (permissionStatus != PermissionStatus.granted) {
-      _handleInvalidPermissions(permissionStatus);
-    }
-  }
-
-  Future<PermissionStatus> _getContactPermission() async {
-    PermissionStatus permission = await PermissionHandler()
-        .checkPermissionStatus(PermissionGroup.contacts);
+  //Check contacts permission
+  Future<PermissionStatus> _getPermission() async {
+    final PermissionStatus permission = await Permission.contacts.status;
     if (permission != PermissionStatus.granted &&
-        permission != PermissionStatus.disabled) {
-      Map<PermissionGroup, PermissionStatus> permissionStatus =
-          await PermissionHandler()
-              .requestPermissions([PermissionGroup.contacts]);
-      return permissionStatus[PermissionGroup.contacts] ??
-          PermissionStatus.unknown;
+        permission != PermissionStatus.denied) {
+      final Map<Permission, PermissionStatus> permissionStatus =
+          await [Permission.contacts].request();
+      return permissionStatus[Permission.contacts] ??
+          PermissionStatus.undetermined;
     } else {
       return permission;
     }
   }
+}
 
-  void _handleInvalidPermissions(PermissionStatus permissionStatus) {
-    if (permissionStatus == PermissionStatus.denied) {
-      throw PlatformException(
-          code: "PERMISSION_DENIED",
-          message: "Access to location data denied",
-          details: null);
-    } else if (permissionStatus == PermissionStatus.disabled) {
-      throw PlatformException(
-          code: "PERMISSION_DISABLED",
-          message: "Location data is not available on device",
-          details: null);
-    }
+class ContactsPage extends StatefulWidget {
+  @override
+  _ContactsPageState createState() => _ContactsPageState();
+}
+
+class _ContactsPageState extends State<ContactsPage> {
+  Iterable<Contact> _contacts;
+
+  @override
+  void initState() {
+    getContacts();
+    super.initState();
+  }
+
+  Future<void> getContacts() async {
+    //Make sure we already have permissions for contacts when we get to this
+    //page, so we can just retrieve it
+    final Iterable<Contact> contacts = await ContactsService.getContacts();
+    setState(() {
+      _contacts = contacts;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Contacts Plugin Example')),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            RaisedButton(
-              child: const Text('Contacts list'),
-              onPressed: () => Navigator.pushNamed(context, '/contactsList'),
-            ),
-            RaisedButton(
-              child: const Text('Native Contacts picker'),
-              onPressed: () =>
-                  Navigator.pushNamed(context, '/nativeContactPicker'),
-            ),
-          ],
-        ),
+      appBar: AppBar(
+        title: (Text('Contacts')),
       ),
+      body: _contacts != null
+          //Build a list view of all contacts, displaying their avatar and
+          // display name
+          ? ListView.builder(
+              itemCount: _contacts?.length ?? 0,
+              itemBuilder: (BuildContext context, int index) {
+                Contact contact = _contacts?.elementAt(index);
+                return ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 2, horizontal: 18),
+                  leading: (contact.avatar != null && contact.avatar.isNotEmpty)
+                      ? CircleAvatar(
+                          backgroundImage: MemoryImage(contact.avatar),
+                        )
+                      : CircleAvatar(
+                          child: Text(contact.initials()),
+                          backgroundColor: Theme.of(context).accentColor,
+                        ),
+                  title: Text(contact.displayName ?? ''),
+                  //This can be further expanded to showing contacts detail
+                  // onPressed().
+                );
+              },
+            )
+          : Center(child: const CircularProgressIndicator()),
     );
   }
 }
